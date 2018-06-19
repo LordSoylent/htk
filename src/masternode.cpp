@@ -206,52 +206,29 @@ void CMasternode::Check(bool forceCheck)
     }
 
     if (!unitTest) {
-		uint256 hashBlock = 0;
-        CTransaction tx = CTransaction();
-        if(!GetTransaction(vin.prevout.hash, tx, hashBlock, true)) {
-            activeState = MASTERNODE_VIN_SPENT;
-            return;
-        }
-        if(tx.vout.size() <= vin.prevout.n) {
-            activeState = MASTERNODE_VIN_SPENT;
-            return;
-        }
-        int64_t checkValue = tx.vout[vin.prevout.n].nValue;
-		bool fAcceptable = false;
-		int tier = GetMNTierByVin(vin.prevout);
-		if (tier >= 0) {
-            TRY_LOCK(cs_main, lockMain);
-            if (!lockMain) return;
-
-            BOOST_FOREACH(PAIRTYPE(const int, int) & mntier, masternodeTiers)
-            {
-                if (!fAcceptable && (mntier.second*COIN) == checkValue) {
-			        CValidationState state;
-			        CMutableTransaction tx = CMutableTransaction();
-					CAmount testValue = GetMNCollateral(pindexBestHeader->nHeight, mntier.first) * COIN - 0.01 * COIN;
-				    CTxOut vout = CTxOut(testValue, Params().MasternodeTestDummyAddress());
-                    tx.vin.push_back(vin);
-                    tx.vout.push_back(vout);
-                    {
-                        TRY_LOCK(cs_main, lockMain);
-                        if (!lockMain) return;
-                        fAcceptable = AcceptableInputs(mempool, state, CTransaction(tx), false, NULL);
-                        if (fAcceptable) { // Update mn tier on our records
-                            tier = (mntier.first);
-                        } else {
-                            tx.vin.pop_back();
-                            tx.vout.pop_back();
-                        }
-                    }
-                }
-            }
+		CMutableTransaction tx = CMutableTransaction();
+		tx.vin.push_back(vin);
+		CAmount testValue = 5000 * COIN - 0.01 * COIN;
+        if(pindexBestHeader->nHeight > TIERED_MASTERNODES_START_BLOCK) {
+			int tier = GetMNTierByVin(vin.prevout);
+			if(tier <= 0) {
+				activeState = MASTERNODE_VIN_SPENT;
+				return;
+			}
+	        testValue = GetMNCollateral(pindexBestHeader->nHeight, tier);
 		}
+		CTxOut vout = CTxOut(testValue, Params().MasternodeTestDummyAddress());
+		tx.vout.push_back(vout);
 
-		if (!fAcceptable) {
-            activeState = MASTERNODE_VIN_SPENT;
-            return;
-        }
-    }
+		TRY_LOCK(cs_main, lockMain);
+		if (!lockMain) return;
+
+		CValidationState state;
+		if (!AcceptableInputs(mempool, state, CTransaction(tx), false, NULL)) {
+			activeState = MASTERNODE_VIN_SPENT;
+			return;
+		}
+	}
 
     activeState = MASTERNODE_ENABLED; // OK
 }
